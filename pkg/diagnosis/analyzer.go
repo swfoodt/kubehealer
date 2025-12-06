@@ -4,73 +4,66 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
-// Analyzer 负责具体的诊断逻辑
 type Analyzer struct {
-	// 未来可以在这里添加配置或缓存
+	client *kubernetes.Clientset
 }
 
-// NewAnalyzer 创建一个新的分析器
-func NewAnalyzer() *Analyzer {
-	return &Analyzer{}
-}
-
-// AnalyzePod 执行 Pod 的全面诊断并打印结果
-func (a *Analyzer) AnalyzePod(pod *corev1.Pod) {
-	// 1. 打印基础信息
-	fmt.Printf("📦 Pod: %s | 命名空间: %s | 节点: %s\n",
-		pod.Name, pod.Namespace, pod.Spec.NodeName)
-
-	fmt.Printf("   状态: %s | 重启总数: %d\n",
-		pod.Status.Phase, sumRestarts(pod))
-
-	// 2. 打印容器状态详情 (这里是 Day 5 逻辑的升级版)
-	fmt.Println("   --- 容器详情 ---")
-	for _, cs := range pod.Status.ContainerStatuses {
-		a.analyzeContainerStatus(cs)
+func NewAnalyzer(client *kubernetes.Clientset) *Analyzer {
+	return &Analyzer{
+		client: client,
 	}
 }
 
-// 辅助函数: 计算所有容器的重启次数总和
+// AnalyzePod 编排诊断流程
+func (a *Analyzer) AnalyzePod(pod *corev1.Pod) {
+	// 1. 获取并打印基础信息
+	info := a.GetPodBasicInfo(pod)
+	fmt.Println(info)
+
+	// 2. 获取并打印容器状态
+	fmt.Println("   --- 容器详情 ---")
+	for _, cs := range pod.Status.ContainerStatuses {
+		statusMsg := a.GetContainerStatus(cs)
+		fmt.Println(statusMsg)
+	}
+}
+
+// GetPodBasicInfo 提取基础信息字符串
+func (a *Analyzer) GetPodBasicInfo(pod *corev1.Pod) string {
+	return fmt.Sprintf("📦 Pod: %s | 命名空间: %s | 节点: %s\n   状态: %s | 重启总数: %d",
+		pod.Name, pod.Namespace, pod.Spec.NodeName,
+		pod.Status.Phase, sumRestarts(pod))
+}
+
+// GetContainerStatus 解析单个容器状态
+func (a *Analyzer) GetContainerStatus(cs corev1.ContainerStatus) string {
+	prefix := fmt.Sprintf("   ├─ 容器: %s", cs.Name)
+
+	if cs.State.Waiting != nil {
+		return fmt.Sprintf("%s\n   └─ ⚠️  状态: Waiting | 原因: %s | 信息: %s",
+			prefix, cs.State.Waiting.Reason, cs.State.Waiting.Message)
+	}
+
+	if cs.State.Terminated != nil {
+		return fmt.Sprintf("%s\n   └─ 🛑 状态: Terminated | 原因: %s | 退出码: %d | 信息: %s",
+			prefix, cs.State.Terminated.Reason, cs.State.Terminated.ExitCode, cs.State.Terminated.Message)
+	}
+
+	// Running
+	status := fmt.Sprintf("%s\n   └─ ✅ 状态: Running", prefix)
+	if cs.RestartCount > 0 {
+		status += fmt.Sprintf(" (但已重启 %d 次)", cs.RestartCount)
+	}
+	return status
+}
+
 func sumRestarts(pod *corev1.Pod) int32 {
 	var count int32
 	for _, cs := range pod.Status.ContainerStatuses {
 		count += cs.RestartCount
 	}
 	return count
-}
-
-// analyzeContainerStatus 分析单个容器的状态
-func (a *Analyzer) analyzeContainerStatus(cs corev1.ContainerStatus) {
-	prefix := fmt.Sprintf("   ├─ 容器: %s", cs.Name)
-
-	// Case 1: Waiting (例如 CrashLoopBackOff, ImagePullBackOff)
-	if cs.State.Waiting != nil {
-		fmt.Printf("%s\n", prefix)
-		fmt.Printf("   └─ ⚠️  状态: Waiting | 原因: %s | 信息: %s\n",
-			cs.State.Waiting.Reason, cs.State.Waiting.Message)
-		return
-	}
-
-	// Case 2: Terminated (例如 Error, OOMKilled)
-	if cs.State.Terminated != nil {
-		fmt.Printf("%s\n", prefix)
-		fmt.Printf("   └─ 🛑 状态: Terminated | 原因: %s | 退出码: %d | 信息: %s\n",
-			cs.State.Terminated.Reason, cs.State.Terminated.ExitCode, cs.State.Terminated.Message)
-		return
-	}
-
-	// Case 3: Running
-	if cs.State.Running != nil {
-		// 如果虽然 Running 但有重启过，也标记一下
-		if cs.RestartCount > 0 {
-			fmt.Printf("%s\n", prefix)
-			fmt.Printf("   └─ ⚠️  状态: Running (但已重启 %d 次)\n", cs.RestartCount)
-		} else {
-			fmt.Printf("%s\n", prefix)
-			fmt.Printf("   └─ ✅ 状态: Running\n")
-		}
-		return
-	}
 }
