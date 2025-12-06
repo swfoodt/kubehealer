@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: image-error-pod
+spec:
+  containers:
+  - name: typo-container
+    # 这是一个故意写错的镜像名，拉不下来
+    image: nginx:1.99.99-not-exist

@@ -46,20 +46,31 @@ func (a *Analyzer) GetPodBasicInfo(pod *corev1.Pod) string {
 func (a *Analyzer) GetContainerStatus(cs corev1.ContainerStatus) string {
 	prefix := fmt.Sprintf("   ├─ 容器: %s", cs.Name)
 
+	// Waiting 状态处理
 	if cs.State.Waiting != nil {
-		msg := fmt.Sprintf("%s\n   └─ ⚠️  状态: Waiting | 原因: %s | 信息: %s",
-			prefix, cs.State.Waiting.Reason, cs.State.Waiting.Message)
+		reason := cs.State.Waiting.Reason
+		msg := cs.State.Waiting.Message
 
-		//  如果正在 Waiting，查上一次是因为什么挂的
+		// 镜像拉取失败的专门诊断
+		if reason == "ImagePullBackOff" || reason == "ErrImagePull" {
+			return fmt.Sprintf("%s\n   └─ 🚫 镜像拉取失败: 无法获取镜像 '%s'\n      可能原因: 镜像名拼写错误 / 镜像不存在 / 私有仓库缺少 ImagePullSecrets\n      原始报错: %s",
+				prefix, cs.Image, msg)
+		}
+
+		output := fmt.Sprintf("%s\n   └─ ⚠️  状态: Waiting | 原因: %s | 信息: %s",
+			prefix, reason, msg)
+
+		// 查看上次退出原因
 		if cs.LastTerminationState.Terminated != nil {
 			lastState := cs.LastTerminationState.Terminated
-			exitInfo := explainExitCode(lastState.ExitCode) // 复用刚才写的翻译函数
-			msg += fmt.Sprintf("\n      👀 上次退出: %s | 退出码: %s",
+			exitInfo := explainExitCode(lastState.ExitCode)
+			output += fmt.Sprintf("\n      👀 上次退出: %s | 退出码: %s",
 				lastState.Reason, exitInfo)
 		}
 
-		return msg
+		return output
 	}
+	// Terminated 状态处理
 	if cs.State.Terminated != nil {
 		// 使用 explainExitCode 翻译退出码
 		exitInfo := explainExitCode(cs.State.Terminated.ExitCode)
@@ -68,7 +79,7 @@ func (a *Analyzer) GetContainerStatus(cs corev1.ContainerStatus) string {
 			prefix, cs.State.Terminated.Reason, exitInfo, cs.State.Terminated.Message)
 	}
 
-	// Running
+	// Running 状态处理
 	status := fmt.Sprintf("%s\n   └─ ✅ 状态: Running", prefix)
 	if cs.RestartCount > 0 {
 		status += fmt.Sprintf(" (但已重启 %d 次)", cs.RestartCount)
