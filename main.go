@@ -44,15 +44,15 @@ func main() {
 	if len(pods.Items) == 0 {
 		fmt.Println("default 命名空间当前没有 Pod。")
 	} else {
-		fmt.Println("--- Pod 状态详情 ---")
+		fmt.Println("--- 🚀 Pod 状态详情 ---")
 		for _, pod := range pods.Items {
-			// 1. 获取 Pod 状态
+			// 获取 Pod 状态
 			status := string(pod.Status.Phase) // Status.Phase: Running, Pending, Failed, etc.
 
-			// 2. 获取节点名
+			// 获取节点名
 			nodeName := pod.Spec.NodeName // 调度到的节点名称
 
-			// 3. 获取重启次数 (只取第一个容器)
+			// 获取重启次数 (只取第一个容器)
 			var restartCount int32 = 0
 			if len(pod.Status.ContainerStatuses) > 0 {
 				restartCount = pod.Status.ContainerStatuses[0].RestartCount
@@ -61,6 +61,7 @@ func main() {
 			fmt.Printf("Pod: %s, Status: %s, Node: %s, Restarts: %d\n",
 				pod.Name, status, nodeName, restartCount)
 
+			// 深入解析容器状态
 			for _, containerStatus := range pod.Status.ContainerStatuses {
 				fmt.Printf("    ├─ 容器: %s\n", containerStatus.Name)
 
