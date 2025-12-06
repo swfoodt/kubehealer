@@ -47,13 +47,25 @@ func (a *Analyzer) GetContainerStatus(cs corev1.ContainerStatus) string {
 	prefix := fmt.Sprintf("   ├─ 容器: %s", cs.Name)
 
 	if cs.State.Waiting != nil {
-		return fmt.Sprintf("%s\n   └─ ⚠️  状态: Waiting | 原因: %s | 信息: %s",
+		msg := fmt.Sprintf("%s\n   └─ ⚠️  状态: Waiting | 原因: %s | 信息: %s",
 			prefix, cs.State.Waiting.Reason, cs.State.Waiting.Message)
-	}
 
+		//  如果正在 Waiting，查上一次是因为什么挂的
+		if cs.LastTerminationState.Terminated != nil {
+			lastState := cs.LastTerminationState.Terminated
+			exitInfo := explainExitCode(lastState.ExitCode) // 复用刚才写的翻译函数
+			msg += fmt.Sprintf("\n      👀 上次退出: %s | 退出码: %s",
+				lastState.Reason, exitInfo)
+		}
+
+		return msg
+	}
 	if cs.State.Terminated != nil {
-		return fmt.Sprintf("%s\n   └─ 🛑 状态: Terminated | 原因: %s | 退出码: %d | 信息: %s",
-			prefix, cs.State.Terminated.Reason, cs.State.Terminated.ExitCode, cs.State.Terminated.Message)
+		// 使用 explainExitCode 翻译退出码
+		exitInfo := explainExitCode(cs.State.Terminated.ExitCode)
+
+		return fmt.Sprintf("%s\n   └─ 🛑 状态: Terminated | 原因: %s | 退出码: %s | 信息: %s",
+			prefix, cs.State.Terminated.Reason, exitInfo, cs.State.Terminated.Message)
 	}
 
 	// Running
@@ -132,4 +144,31 @@ func translateTimestamp(t time.Time) string {
 		return fmt.Sprintf("%.0f分钟前", duration.Minutes())
 	}
 	return fmt.Sprintf("%.0f小时前", duration.Hours())
+}
+
+// 常见退出码映射表
+var exitCodeMap = map[int32]string{
+	0:   "Completed (正常退出)",
+	1:   "General Error (应用内部错误)",
+	2:   "Misuse of Shell Builtins (Shell内建命令误用)",
+	126: "Invoked Command Cannot Execute (命令不可执行)",
+	127: "Command Not Found (命令未找到)",
+	128: "Invalid Exit Argument (无效的退出参数)",
+	130: "Script Terminated by Control-C (被Ctrl+C终止)",
+	137: "SIGKILL (强制终止/OOMKilled - 内存溢出)",
+	143: "SIGTERM (优雅终止)",
+}
+
+// explainExitCode 将数字退出码转换为人类可读的字符串
+func explainExitCode(code int32) string {
+	if msg, ok := exitCodeMap[code]; ok {
+		return fmt.Sprintf("%d (%s)", code, msg)
+	}
+
+	// 处理 128+n 的信号退出情况
+	if code > 128 {
+		return fmt.Sprintf("%d (Signal %d)", code, code-128)
+	}
+
+	return fmt.Sprintf("%d (未知错误码)", code)
 }
