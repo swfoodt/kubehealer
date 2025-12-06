@@ -56,6 +56,12 @@ func (a *Analyzer) GetPodBasicInfo(pod *corev1.Pod) string {
 func (a *Analyzer) GetContainerStatus(cs corev1.ContainerStatus, containerSpec *corev1.Container) string {
 	prefix := fmt.Sprintf("   ├─ 容器: %s", cs.Name)
 
+	// Day 12: 只要能找到 Spec，就先把资源信息准备好
+	var resourceInfo string
+	if containerSpec != nil {
+		resourceInfo = "\n" + a.GetResourceInfo(*containerSpec)
+	}
+
 	// Waiting 状态处理
 	if cs.State.Waiting != nil {
 		reason := cs.State.Waiting.Reason
@@ -89,7 +95,7 @@ func (a *Analyzer) GetContainerStatus(cs corev1.ContainerStatus, containerSpec *
 			}
 		}
 
-		return output
+		return output + resourceInfo
 	}
 	// Terminated 状态处理
 	if cs.State.Terminated != nil {
@@ -109,7 +115,7 @@ func (a *Analyzer) GetContainerStatus(cs corev1.ContainerStatus, containerSpec *
 			}
 		}
 
-		return msg
+		return msg + resourceInfo
 	}
 
 	// Running 状态处理
@@ -117,7 +123,7 @@ func (a *Analyzer) GetContainerStatus(cs corev1.ContainerStatus, containerSpec *
 	if cs.RestartCount > 0 {
 		status += fmt.Sprintf(" (但已重启 %d 次)", cs.RestartCount)
 	}
-	return status
+	return status + resourceInfo
 }
 
 func sumRestarts(pod *corev1.Pod) int32 {
@@ -190,6 +196,34 @@ func translateTimestamp(t time.Time) string {
 	return fmt.Sprintf("%.0f小时前", duration.Hours())
 }
 
+// GetResourceInfo 格式化容器的资源配置
+func (a *Analyzer) GetResourceInfo(container corev1.Container) string {
+	req := container.Resources.Requests
+	lim := container.Resources.Limits
+
+	reqCPU := req.Cpu().String()
+	reqMem := req.Memory().String()
+	limCPU := lim.Cpu().String()
+	limMem := lim.Memory().String()
+
+	// 处理未设置的情况 (0)
+	if reqCPU == "0" {
+		reqCPU = "未设置"
+	}
+	if reqMem == "0" {
+		reqMem = "未设置"
+	}
+	if limCPU == "0" {
+		limCPU = "未设置"
+	}
+	if limMem == "0" {
+		limMem = "未设置"
+	}
+
+	return fmt.Sprintf("      📊 资源配置: CPU(Req=%s/Lim=%s) | Mem(Req=%s/Lim=%s)",
+		reqCPU, limCPU, reqMem, limMem)
+}
+
 // 常见退出码映射表
 var exitCodeMap = map[int32]string{
 	0:   "Completed (正常退出)",
@@ -203,7 +237,7 @@ var exitCodeMap = map[int32]string{
 	143: "SIGTERM (优雅终止)",
 }
 
-// explainExitCode 将数字退出码转换为人类可读的字符串
+// explainExitCode 将数字退出码转换为可读的字符串
 func explainExitCode(code int32) string {
 	if msg, ok := exitCodeMap[code]; ok {
 		return fmt.Sprintf("%d (%s)", code, msg)
