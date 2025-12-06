@@ -30,7 +30,17 @@ func (a *Analyzer) AnalyzePod(pod *corev1.Pod) {
 	// 2. 获取并打印容器状态
 	fmt.Println("   --- 容器详情 ---")
 	for _, cs := range pod.Status.ContainerStatuses {
-		statusMsg := a.GetContainerStatus(cs)
+		// 寻找对应的 Container Spec
+		var targetContainer *corev1.Container
+		for i := range pod.Spec.Containers {
+			if pod.Spec.Containers[i].Name == cs.Name {
+				targetContainer = &pod.Spec.Containers[i]
+				break
+			}
+		}
+
+		// 传入 spec
+		statusMsg := a.GetContainerStatus(cs, targetContainer)
 		fmt.Println(statusMsg)
 	}
 }
@@ -43,7 +53,7 @@ func (a *Analyzer) GetPodBasicInfo(pod *corev1.Pod) string {
 }
 
 // GetContainerStatus 解析单个容器状态
-func (a *Analyzer) GetContainerStatus(cs corev1.ContainerStatus) string {
+func (a *Analyzer) GetContainerStatus(cs corev1.ContainerStatus, containerSpec *corev1.Container) string {
 	prefix := fmt.Sprintf("   ├─ 容器: %s", cs.Name)
 
 	// Waiting 状态处理
@@ -51,14 +61,17 @@ func (a *Analyzer) GetContainerStatus(cs corev1.ContainerStatus) string {
 		reason := cs.State.Waiting.Reason
 		msg := cs.State.Waiting.Message
 
-		// 镜像拉取失败的专门诊断
-		if reason == "ImagePullBackOff" || reason == "ErrImagePull" {
-			return fmt.Sprintf("%s\n   └─ 🚫 镜像拉取失败: 无法获取镜像 '%s'\n      可能原因: 镜像名拼写错误 / 镜像不存在 / 私有仓库缺少 ImagePullSecrets\n      原始报错: %s",
-				prefix, cs.Image, msg)
-		}
+		var output string
 
-		output := fmt.Sprintf("%s\n   └─ ⚠️  状态: Waiting | 原因: %s | 信息: %s",
-			prefix, reason, msg)
+		// 先判断是不是镜像问题
+		if reason == "ImagePullBackOff" || reason == "ErrImagePull" {
+			output = fmt.Sprintf("%s\n   └─ 🚫 镜像拉取失败: 无法获取镜像 '%s'\n      可能原因: 镜像名拼写错误 / 镜像不存在 / 私有仓库缺少 ImagePullSecrets\n      原始报错: %s",
+				prefix, cs.Image, msg)
+		} else {
+			// 普通等待状态
+			output = fmt.Sprintf("%s\n   └─ ⚠️  状态: Waiting | 原因: %s | 信息: %s",
+				prefix, reason, msg)
+		}
 
 		// 查看上次退出原因
 		if cs.LastTerminationState.Terminated != nil {
@@ -66,6 +79,14 @@ func (a *Analyzer) GetContainerStatus(cs corev1.ContainerStatus) string {
 			exitInfo := explainExitCode(lastState.ExitCode)
 			output += fmt.Sprintf("\n      👀 上次退出: %s | 退出码: %s",
 				lastState.Reason, exitInfo)
+
+			// 【OOM 补丁】: 如果上次是因为 OOM 挂的，给出建议
+			if lastState.Reason == "OOMKilled" && containerSpec != nil {
+				limit := containerSpec.Resources.Limits.Memory()
+				if !limit.IsZero() {
+					output += fmt.Sprintf("\n      💡 诊断建议: 内存溢出! 检测到 Limit=%s，建议增加资源限制。", limit.String())
+				}
+			}
 		}
 
 		return output
@@ -73,10 +94,22 @@ func (a *Analyzer) GetContainerStatus(cs corev1.ContainerStatus) string {
 	// Terminated 状态处理
 	if cs.State.Terminated != nil {
 		// 使用 explainExitCode 翻译退出码
-		exitInfo := explainExitCode(cs.State.Terminated.ExitCode)
+		reason := cs.State.Terminated.Reason
+		exitCode := cs.State.Terminated.ExitCode
+		exitInfo := explainExitCode(exitCode)
 
-		return fmt.Sprintf("%s\n   └─ 🛑 状态: Terminated | 原因: %s | 退出码: %s | 信息: %s",
-			prefix, cs.State.Terminated.Reason, exitInfo, cs.State.Terminated.Message)
+		msg := fmt.Sprintf("%s\n   └─ 🛑 状态: Terminated | 原因: %s | 退出码: %s | 信息: %s",
+			prefix, reason, exitInfo, cs.State.Terminated.Message)
+
+		// OOMKilled 建议
+		if reason == "OOMKilled" && containerSpec != nil {
+			limit := containerSpec.Resources.Limits.Memory()
+			if !limit.IsZero() {
+				msg += fmt.Sprintf("\n      💡 诊断建议: 内存溢出! 检测到 Limit=%s，建议增加资源限制。", limit.String())
+			}
+		}
+
+		return msg
 	}
 
 	// Running 状态处理
