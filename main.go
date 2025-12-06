@@ -44,7 +44,7 @@ func main() {
 	if len(pods.Items) == 0 {
 		fmt.Println("default 命名空间当前没有 Pod。")
 	} else {
-		fmt.Println("--- 🚀 Pod 状态详情 ---")
+		fmt.Println("--- Pod 状态详情 ---")
 		for _, pod := range pods.Items {
 			// 1. 获取 Pod 状态
 			status := string(pod.Status.Phase) // Status.Phase: Running, Pending, Failed, etc.
@@ -60,6 +60,30 @@ func main() {
 
 			fmt.Printf("Pod: %s, Status: %s, Node: %s, Restarts: %d\n",
 				pod.Name, status, nodeName, restartCount)
+
+			for _, containerStatus := range pod.Status.ContainerStatuses {
+				fmt.Printf("    ├─ 容器: %s\n", containerStatus.Name)
+
+				// 检查 Waiting 状态 (例如 CrashLoopBackOff, ImagePullBackOff)
+				if containerStatus.State.Waiting != nil {
+					reason := containerStatus.State.Waiting.Reason
+					msg := containerStatus.State.Waiting.Message
+					fmt.Printf("    └─ ⚠️  状态: Waiting | 原因: %s | 信息: %s\n", reason, msg)
+				}
+
+				// 检查 Terminated 状态 (例如 Error, OOMKilled)
+				if containerStatus.State.Terminated != nil {
+					reason := containerStatus.State.Terminated.Reason
+					exitCode := containerStatus.State.Terminated.ExitCode
+					fmt.Printf("    └─ 🛑 状态: Terminated | 原因: %s | 退出码: %d\n", reason, exitCode)
+				}
+
+				// 检查 Running 状态
+				if containerStatus.State.Running != nil {
+					fmt.Printf("    └─ ✅ 状态: Running\n")
+				}
+			}
+			fmt.Println() // 空行分隔
 		}
 	}
 }

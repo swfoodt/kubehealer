@@ -1,0 +1,13 @@
+# test/manifests/crash-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: crash-pod
+spec:
+  containers:
+  - name: error-container
+    image: busybox
+    # 容器启动后执行的命令，sleep 5 秒后立即退出
+    command: ["/bin/sh", "-c", "echo 'I am crashing now.'; sleep 5; exit 1"] 
+    # restartPolicy 必须是 Always 或 OnFailure 才会进入 CrashLoopBackOff
+  restartPolicy: Always
