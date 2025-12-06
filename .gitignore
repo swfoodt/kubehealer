@@ -1,0 +1,23 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (如果使用了 vendor 模式)
+vendor/
+
+# IDE specific files (忽略 VS Code 配置)
+.vscode/
+.idea/
+
+# OS specific files (忽略 Mac/Windows 系统缩略图)
+.DS_Store
+Thumbs.db

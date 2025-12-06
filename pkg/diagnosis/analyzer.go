@@ -1,9 +1,13 @@
 package diagnosis
 
 import (
+	"context"
 	"fmt"
+	"sort"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -66,4 +70,66 @@ func sumRestarts(pod *corev1.Pod) int32 {
 		count += cs.RestartCount
 	}
 	return count
+}
+
+// GetPodEvents 获取并打印 Pod 的相关事件
+func (a *Analyzer) GetPodEvents(pod *corev1.Pod) {
+	fmt.Println("   --- 📋 最近事件 (Events) ---")
+
+	// 使用 FieldSelector 过滤出涉及该 Pod 的事件
+	// involvedObject.uid = Pod UID (更精确，防止同名冲突)
+	selector := fmt.Sprintf("involvedObject.name=%s,involvedObject.namespace=%s,involvedObject.uid=%s",
+		pod.Name, pod.Namespace, pod.UID)
+
+	events, err := a.client.CoreV1().Events(pod.Namespace).List(context.TODO(), metav1.ListOptions{
+		FieldSelector: selector,
+	})
+
+	if err != nil {
+		fmt.Printf("   ❌ 获取事件失败: %v\n", err)
+		return
+	}
+
+	if len(events.Items) == 0 {
+		fmt.Println("   (无事件记录)")
+		return
+	}
+
+	// 按时间排序 (LastTimestamp)
+	sort.Slice(events.Items, func(i, j int) bool {
+		return events.Items[i].LastTimestamp.Time.Before(events.Items[j].LastTimestamp.Time)
+	})
+
+	// 打印最近的 5 条
+	start := 0
+	if len(events.Items) > 5 {
+		start = len(events.Items) - 5
+	}
+
+	for i := start; i < len(events.Items); i++ {
+		e := events.Items[i]
+		age := translateTimestamp(e.LastTimestamp.Time)
+
+		icon := "🔹"
+		if e.Type == "Warning" {
+			icon = "🔸"
+		}
+
+		fmt.Printf("   %s [%s] %s: %s\n", icon, age, e.Reason, e.Message)
+	}
+}
+
+// translateTimestamp 计算时间差
+func translateTimestamp(t time.Time) string {
+	if t.IsZero() {
+		return "未知"
+	}
+	duration := time.Since(t)
+	if duration.Seconds() < 60 {
+		return fmt.Sprintf("%.0f秒前", duration.Seconds())
+	}
+	if duration.Minutes() < 60 {
+		return fmt.Sprintf("%.0f分钟前", duration.Minutes())
+	}
+	return fmt.Sprintf("%.0f小时前", duration.Hours())
 }

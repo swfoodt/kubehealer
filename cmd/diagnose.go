@@ -39,7 +39,7 @@ var diagnoseCmd = &cobra.Command{
 		// 3. 调用分析器
 		analyzer := diagnosis.NewAnalyzer(client.Clientset)
 		analyzer.AnalyzePod(pod)
-		// analyzer.GetPodEvents(pod) // Day 8 的内容先注释掉或留着都可以
+		analyzer.GetPodEvents(pod) // 获取并打印事件
 	},
 }
 
