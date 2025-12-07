@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,24 +12,26 @@ import (
 
 type Analyzer struct {
 	client *kubernetes.Clientset
+	engine *RuleEngine // 诊断引擎
 }
 
 func NewAnalyzer(client *kubernetes.Clientset) *Analyzer {
 	return &Analyzer{
 		client: client,
+		engine: NewRuleEngine(), // 初始化诊断引擎
 	}
 }
 
 // AnalyzePod 编排诊断流程
 func (a *Analyzer) AnalyzePod(pod *corev1.Pod) {
-	// 1. 获取并打印基础信息
+	// 获取并打印基础信息
 	info := a.GetPodBasicInfo(pod)
 	fmt.Println(info)
 
-	// 2. 获取并打印容器状态
+	// 获取并打印容器状态
 	fmt.Println("   --- 容器详情 ---")
 	for _, cs := range pod.Status.ContainerStatuses {
-		// 寻找对应的 Container Spec
+		// 寻找对应的 Container Spec 以获取资源配置
 		var targetContainer *corev1.Container
 		for i := range pod.Spec.Containers {
 			if pod.Spec.Containers[i].Name == cs.Name {
@@ -39,8 +40,8 @@ func (a *Analyzer) AnalyzePod(pod *corev1.Pod) {
 			}
 		}
 
-		// 传入 spec
-		statusMsg := a.GetContainerStatus(cs, targetContainer)
+		// 传入 pod 对象,获取单容器诊断结果
+		statusMsg := a.GetContainerStatus(pod, cs, targetContainer)
 		fmt.Println(statusMsg)
 	}
 }
@@ -49,89 +50,60 @@ func (a *Analyzer) AnalyzePod(pod *corev1.Pod) {
 func (a *Analyzer) GetPodBasicInfo(pod *corev1.Pod) string {
 	return fmt.Sprintf("📦 Pod: %s | 命名空间: %s | 节点: %s\n   状态: %s | 重启总数: %d",
 		pod.Name, pod.Namespace, pod.Spec.NodeName,
-		pod.Status.Phase, sumRestarts(pod))
+		pod.Status.Phase, SumRestarts(pod))
 }
 
 // GetContainerStatus 解析单个容器状态
-func (a *Analyzer) GetContainerStatus(cs corev1.ContainerStatus, containerSpec *corev1.Container) string {
+func (a *Analyzer) GetContainerStatus(pod *corev1.Pod, cs corev1.ContainerStatus, containerSpec *corev1.Container) string {
 	prefix := fmt.Sprintf("   ├─ 容器: %s", cs.Name)
 
-	// Day 12: 只要能找到 Spec，就先把资源信息准备好
+	// 只要能找到 Spec，就先把资源信息准备好
 	var resourceInfo string
 	if containerSpec != nil {
 		resourceInfo = "\n" + a.GetResourceInfo(*containerSpec)
 	}
 
-	// Waiting 状态处理
-	if cs.State.Waiting != nil {
-		reason := cs.State.Waiting.Reason
-		msg := cs.State.Waiting.Message
-
-		var output string
-
-		// 先判断是不是镜像问题
-		if reason == "ImagePullBackOff" || reason == "ErrImagePull" {
-			output = fmt.Sprintf("%s\n   └─ 🚫 镜像拉取失败: 无法获取镜像 '%s'\n      可能原因: 镜像名拼写错误 / 镜像不存在 / 私有仓库缺少 ImagePullSecrets\n      原始报错: %s",
-				prefix, cs.Image, msg)
-		} else {
-			// 普通等待状态
-			output = fmt.Sprintf("%s\n   └─ ⚠️  状态: Waiting | 原因: %s | 信息: %s",
-				prefix, reason, msg)
+	// ----------------------------------------------------
+	// 规则引擎介入
+	// ----------------------------------------------------
+	result := a.engine.Run(pod, containerSpec, cs)
+	if result != nil {
+		// 如果规则引擎发现了问题，直接用规则引擎的结果
+		icon := "⚠️ "
+		// 如果是比较严重的错误，换个图标
+		if result.Title == "内存溢出 (OOMKilled)" {
+			icon = "🛑 "
 		}
 
-		// 查看上次退出原因
-		if cs.LastTerminationState.Terminated != nil {
-			lastState := cs.LastTerminationState.Terminated
-			exitInfo := explainExitCode(lastState.ExitCode)
-			output += fmt.Sprintf("\n      👀 上次退出: %s | 退出码: %s",
-				lastState.Reason, exitInfo)
-
-			// 【OOM 补丁】: 如果上次是因为 OOM 挂的，给出建议
-			if lastState.Reason == "OOMKilled" && containerSpec != nil {
-				limit := containerSpec.Resources.Limits.Memory()
-				if !limit.IsZero() {
-					output += fmt.Sprintf("\n      💡 诊断建议: 内存溢出! 检测到 Limit=%s，建议增加资源限制。", limit.String())
-				}
-			}
+		output := fmt.Sprintf("%s\n   └─ %s %s", prefix, icon, result.Title)
+		if result.RawError != "" {
+			output += fmt.Sprintf(" | %s", result.RawError)
 		}
-
+		if result.Suggestion != "" {
+			output += fmt.Sprintf("\n      💡 建议: %s", result.Suggestion)
+		}
 		return output + resourceInfo
 	}
-	// Terminated 状态处理
-	if cs.State.Terminated != nil {
-		// 使用 explainExitCode 翻译退出码
-		reason := cs.State.Terminated.Reason
-		exitCode := cs.State.Terminated.ExitCode
-		exitInfo := explainExitCode(exitCode)
 
-		msg := fmt.Sprintf("%s\n   └─ 🛑 状态: Terminated | 原因: %s | 退出码: %s | 信息: %s",
-			prefix, reason, exitInfo, cs.State.Terminated.Message)
-
-		// OOMKilled 建议
-		if reason == "OOMKilled" && containerSpec != nil {
-			limit := containerSpec.Resources.Limits.Memory()
-			if !limit.IsZero() {
-				msg += fmt.Sprintf("\n      💡 诊断建议: 内存溢出! 检测到 Limit=%s，建议增加资源限制。", limit.String())
-			}
-		}
-
-		return msg + resourceInfo
+	// 如果规则引擎没发现问题 (Matched=false)，回退到原来的默认展示逻辑,保持旧逻辑作为 fallback
+	// 1. Waiting
+	if cs.State.Waiting != nil {
+		return fmt.Sprintf("%s\n   └─ ⚠️  状态: Waiting | 原因: %s | 信息: %s",
+			prefix, cs.State.Waiting.Reason, cs.State.Waiting.Message) + resourceInfo
 	}
 
-	// Running 状态处理
+	// 2. Terminated
+	if cs.State.Terminated != nil {
+		return fmt.Sprintf("%s\n   └─ 🛑 状态: Terminated | 原因: %s | 退出码: %d",
+			prefix, cs.State.Terminated.Reason, cs.State.Terminated.ExitCode) + resourceInfo
+	}
+
+	// 3. Running
 	status := fmt.Sprintf("%s\n   └─ ✅ 状态: Running", prefix)
 	if cs.RestartCount > 0 {
 		status += fmt.Sprintf(" (但已重启 %d 次)", cs.RestartCount)
 	}
 	return status + resourceInfo
-}
-
-func sumRestarts(pod *corev1.Pod) int32 {
-	var count int32
-	for _, cs := range pod.Status.ContainerStatuses {
-		count += cs.RestartCount
-	}
-	return count
 }
 
 // GetPodEvents 获取并打印 Pod 的相关事件
@@ -170,7 +142,7 @@ func (a *Analyzer) GetPodEvents(pod *corev1.Pod) {
 
 	for i := start; i < len(events.Items); i++ {
 		e := events.Items[i]
-		age := translateTimestamp(e.LastTimestamp.Time)
+		age := TranslateTimestamp(e.LastTimestamp.Time)
 
 		icon := "🔹"
 		if e.Type == "Warning" {
@@ -179,21 +151,6 @@ func (a *Analyzer) GetPodEvents(pod *corev1.Pod) {
 
 		fmt.Printf("   %s [%s] %s: %s\n", icon, age, e.Reason, e.Message)
 	}
-}
-
-// translateTimestamp 计算时间差
-func translateTimestamp(t time.Time) string {
-	if t.IsZero() {
-		return "未知"
-	}
-	duration := time.Since(t)
-	if duration.Seconds() < 60 {
-		return fmt.Sprintf("%.0f秒前", duration.Seconds())
-	}
-	if duration.Minutes() < 60 {
-		return fmt.Sprintf("%.0f分钟前", duration.Minutes())
-	}
-	return fmt.Sprintf("%.0f小时前", duration.Hours())
 }
 
 // GetResourceInfo 格式化容器的资源配置
@@ -222,31 +179,4 @@ func (a *Analyzer) GetResourceInfo(container corev1.Container) string {
 
 	return fmt.Sprintf("      📊 资源配置: CPU(Req=%s/Lim=%s) | Mem(Req=%s/Lim=%s)",
 		reqCPU, limCPU, reqMem, limMem)
-}
-
-// 常见退出码映射表
-var exitCodeMap = map[int32]string{
-	0:   "Completed (正常退出)",
-	1:   "General Error (应用内部错误)",
-	2:   "Misuse of Shell Builtins (Shell内建命令误用)",
-	126: "Invoked Command Cannot Execute (命令不可执行)",
-	127: "Command Not Found (命令未找到)",
-	128: "Invalid Exit Argument (无效的退出参数)",
-	130: "Script Terminated by Control-C (被Ctrl+C终止)",
-	137: "SIGKILL (强制终止/OOMKilled - 内存溢出)",
-	143: "SIGTERM (优雅终止)",
-}
-
-// explainExitCode 将数字退出码转换为可读的字符串
-func explainExitCode(code int32) string {
-	if msg, ok := exitCodeMap[code]; ok {
-		return fmt.Sprintf("%d (%s)", code, msg)
-	}
-
-	// 处理 128+n 的信号退出情况
-	if code > 128 {
-		return fmt.Sprintf("%d (Signal %d)", code, code-128)
-	}
-
-	return fmt.Sprintf("%d (未知错误码)", code)
 }
