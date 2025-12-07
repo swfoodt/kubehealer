@@ -62,6 +62,16 @@ var diagnoseCmd = &cobra.Command{
 				os.Exit(1)
 			}
 			fmt.Println(string(jsonData))
+		case "html":
+			// Day 19: HTML 输出
+			filename := "report.html"
+			err := report.GenerateHTML(result, filename)
+			if err != nil {
+				fmt.Printf("❌ 生成 HTML 失败: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("✅ 诊断报告已生成: %s (请用浏览器打开)\n", filename)
+
 		default:
 			report.PrintTable(result)
 		}
