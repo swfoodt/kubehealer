@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -54,10 +55,14 @@ var diagnoseCmd = &cobra.Command{
 			md := report.GenerateMarkdown(result)
 			fmt.Println(md)
 		case "json":
-			// Day 18 会做这个，先占位
-			fmt.Println("JSON output coming soon in Day 18")
+			// MarshalIndent 生成带缩进的 JSON
+			jsonData, err := json.MarshalIndent(result, "", "  ")
+			if err != nil {
+				fmt.Printf("❌ JSON 序列化失败: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println(string(jsonData))
 		default:
-			// 默认打印表格
 			report.PrintTable(result)
 		}
 
