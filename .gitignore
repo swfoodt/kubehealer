@@ -21,3 +21,6 @@ vendor/
 # OS specific files (忽略 Mac/Windows 系统缩略图)
 .DS_Store
 Thumbs.db
+
+# Reports (忽略生成的报告目录)
+reports/

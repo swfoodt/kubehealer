@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"context"
@@ -64,19 +65,25 @@ var diagnoseCmd = &cobra.Command{
 			}
 			fmt.Println(string(jsonData))
 		case "html":
+			// 自动归档到 reports 目录
+			reportDir := "reports"
+			if _, err := os.Stat(reportDir); os.IsNotExist(err) {
+				_ = os.Mkdir(reportDir, 0755) // 创建目录
+			}
 			// 动态文件名
 			timestamp := time.Now().Format("20060102_150405")
-			filename := fmt.Sprintf("%s_report_%s.html", podName, timestamp)
+			// 格式: reports/pod-name_report_timestamp.html
+			fileName := fmt.Sprintf("%s_report_%s.html", podName, timestamp)
+			fullPath := filepath.Join(reportDir, fileName)
 
-			// 如果用户指定了 --output 文件名 (目前未支持，暂且只支持生成默认名)
-			// 未来可以在这里扩展
-
-			err := report.GenerateHTML(result, filename)
+			err := report.GenerateHTML(result, fullPath)
 			if err != nil {
 				fmt.Printf("❌ 生成 HTML 失败: %v\n", err)
 				os.Exit(1)
 			}
-			fmt.Printf("✅ 诊断报告已生成: %s (请用浏览器打开)\n", filename)
+			// 获取绝对路径，方便用户点击
+			absPath, _ := filepath.Abs(fullPath)
+			fmt.Printf("✅ 诊断报告已归档: %s\n", absPath)
 
 		default:
 			report.PrintTable(result)
