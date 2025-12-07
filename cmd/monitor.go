@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/swfoodt/kubehealer/pkg/diagnosis"
 	"github.com/swfoodt/kubehealer/pkg/k8s"
 	"github.com/swfoodt/kubehealer/pkg/report"
@@ -31,9 +32,16 @@ var monitorCmd = &cobra.Command{
 	Short: "实时监控 Pod 状态变化 (Informer模式)",
 	Long:  `启动一个长运行进程，监听集群内 Pod 的创建、更新和删除事件。支持通过 Namespace 和 Label 进行过滤。`,
 	Run: func(cmd *cobra.Command, args []string) {
+		// Day 28: 从 Viper 获取最终配置 (覆盖全局变量)
+		// 如果命令行没传，就用配置文件的；如果传了，Viper 会自动用命令行的
+		ns := viper.GetString("monitor.namespace")
+		labels := viper.GetString("monitor.labels")
+		interval := viper.GetDuration("monitor.interval")
+
 		fmt.Println("🚀 启动 KubeHealer 监控模式(ctrl+c退出)...")
-		fmt.Printf("   - 监听 Namespace: %s (默认为空，表示所有)\n", monitorNamespace)
-		fmt.Printf("   - 监听 Labels: %s\n", monitorLabels)
+		fmt.Printf("   - 监听 Namespace: %s\n", ns)
+		fmt.Printf("   - 监听 Labels: %s\n", labels)
+		fmt.Printf("   - 同步间隔: %s\n", interval)
 
 		// 初始化客户端
 		client, err := k8s.NewClient()
@@ -48,24 +56,24 @@ var monitorCmd = &cobra.Command{
 
 		// 构造 ListOptions
 		tweakListOptions := func(options *metav1.ListOptions) {
-			if monitorLabels != "" {
-				options.LabelSelector = monitorLabels
+			if labels != "" {
+				options.LabelSelector = labels
 			}
 		}
 
-		if monitorNamespace != "" {
+		if ns != "" {
 			// 如果指定了 Namespace，只监听该 Namespace
 			factory = informers.NewSharedInformerFactoryWithOptions(
 				client.Clientset,
-				monitorInterval,
-				informers.WithNamespace(monitorNamespace),
+				interval,
+				informers.WithNamespace(ns),
 				informers.WithTweakListOptions(tweakListOptions),
 			)
 		} else {
 			// 否则监听所有 Namespace
 			factory = informers.NewSharedInformerFactoryWithOptions(
 				client.Clientset,
-				monitorInterval,
+				interval,
 				informers.WithTweakListOptions(tweakListOptions),
 			)
 		}
@@ -202,4 +210,9 @@ func init() {
 	monitorCmd.Flags().StringVarP(&monitorLabels, "label-selector", "l", "", "指定监控的 Label Selector (例如: app=nginx)")
 	// 默认 10 分钟同步一次，避免长时间运行导致缓存漂移
 	monitorCmd.Flags().DurationVarP(&monitorInterval, "interval", "i", 10*time.Minute, "Informer 全量同步时间间隔 (例如 10m, 1h)")
+
+	// 2. 绑定 Viper (让 Viper 知道这些 Flag 的存在)
+	viper.BindPFlag("monitor.namespace", monitorCmd.Flags().Lookup("namespace"))
+	viper.BindPFlag("monitor.labels", monitorCmd.Flags().Lookup("label-selector"))
+	viper.BindPFlag("monitor.interval", monitorCmd.Flags().Lookup("interval"))
 }
