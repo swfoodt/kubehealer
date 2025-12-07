@@ -30,19 +30,29 @@ func (a *Analyzer) AnalyzePod(pod *corev1.Pod) {
 
 	// 获取并打印容器状态
 	fmt.Println("   --- 容器详情 ---")
-	for _, cs := range pod.Status.ContainerStatuses {
-		// 寻找对应的 Container Spec 以获取资源配置
-		var targetContainer *corev1.Container
-		for i := range pod.Spec.Containers {
-			if pod.Spec.Containers[i].Name == cs.Name {
-				targetContainer = &pod.Spec.Containers[i]
-				break
-			}
-		}
 
-		// 传入 pod 对象,获取单容器诊断结果
-		statusMsg := a.GetContainerStatus(pod, cs, targetContainer)
-		fmt.Println(statusMsg)
+	// 如果 Pod 是 Pending 且没有容器状态，手动触发一次诊断
+	if len(pod.Status.ContainerStatuses) == 0 {
+		// 构造一个空的 dummy 状态，只为了触发 PendingRule
+		dummyStatus := corev1.ContainerStatus{Name: "n/a"}
+		msg := a.GetContainerStatus(pod, dummyStatus, nil)
+		fmt.Println(msg)
+	} else {
+		// 正常遍历
+		for _, cs := range pod.Status.ContainerStatuses {
+			// 寻找对应的 Container Spec 以获取资源配置
+			var targetContainer *corev1.Container
+			for i := range pod.Spec.Containers {
+				if pod.Spec.Containers[i].Name == cs.Name {
+					targetContainer = &pod.Spec.Containers[i]
+					break
+				}
+			}
+
+			// 传入 pod 对象,获取单容器诊断结果
+			statusMsg := a.GetContainerStatus(pod, cs, targetContainer)
+			fmt.Println(statusMsg)
+		}
 	}
 }
 

@@ -40,6 +40,12 @@ var diagnoseCmd = &cobra.Command{
 		analyzer := diagnosis.NewAnalyzer(client.Clientset)
 		analyzer.AnalyzePod(pod)
 		analyzer.GetPodEvents(pod) // 获取并打印事件
+
+		// 打印 PID 和程序退出标记
+		fmt.Printf("\n🏁 [PID: %d] 诊断结束，程序即将退出。\n", os.Getpid())
+
+		// 强制写入新行，清除终端残留输入/输出
+		fmt.Println()
 	},
 }
 

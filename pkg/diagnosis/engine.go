@@ -16,6 +16,7 @@ func NewRuleEngine() *RuleEngine {
 			&OOMRule{},       // 注册 OOM 规则
 			&ImagePullRule{}, // 注册镜像拉取失败规则
 			&CrashRule{},     // 注册崩溃循环规则
+			&PendingRule{},   // 注册调度失败规则
 		},
 	}
 }
