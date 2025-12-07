@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"context"
 
@@ -63,8 +64,13 @@ var diagnoseCmd = &cobra.Command{
 			}
 			fmt.Println(string(jsonData))
 		case "html":
-			// Day 19: HTML 输出
-			filename := "report.html"
+			// 动态文件名
+			timestamp := time.Now().Format("20060102_150405")
+			filename := fmt.Sprintf("%s_report_%s.html", podName, timestamp)
+
+			// 如果用户指定了 --output 文件名 (目前未支持，暂且只支持生成默认名)
+			// 未来可以在这里扩展
+
 			err := report.GenerateHTML(result, filename)
 			if err != nil {
 				fmt.Printf("❌ 生成 HTML 失败: %v\n", err)

@@ -19,6 +19,15 @@ const HTMLTemplate = `
         .issue-error { border-left: 5px solid #dc3545; background-color: #fff5f5; }
         .issue-warning { border-left: 5px solid #ffc107; background-color: #fff3cd; }
         .event-icon { width: 20px; display: inline-block; text-align: center; }
+		/* 时间轴样式 */
+        .timeline { border-left: 2px solid #dee2e6; padding: 10px 0; margin-left: 20px; }
+        .timeline-item { position: relative; padding-left: 30px; margin-bottom: 15px; }
+        .timeline-item::before { 
+            content: ''; position: absolute; left: -6px; top: 5px; width: 10px; height: 10px; 
+            border-radius: 50%; background-color: #0d6efd; border: 2px solid #fff; 
+        }
+        .timeline-item.warning::before { background-color: #ffc107; }
+        .timeline-date { font-size: 0.85em; color: #6c757d; margin-bottom: 2px; }
     </style>
 </head>
 <body>
@@ -81,17 +90,19 @@ const HTMLTemplate = `
         </div>
         {{ end }}
 
-        <h3>最近事件 (Events)</h3>
+        <h3>最近事件 (Timeline)</h3>
         <div class="card">
             <div class="card-body">
                 {{ if not .Events }}
                     <p class="text-muted">暂无事件记录</p>
                 {{ else }}
-                    <ul class="list-group list-group-flush">
+                    <div class="timeline">
                     {{ range .Events }}
-                        <li class="list-group-item">{{ . }}</li>
+                        <div class="timeline-item">
+                            <div class="timeline-content">{{ . }}</div>
+                        </div>
                     {{ end }}
-                    </ul>
+                    </div>
                 {{ end }}
             </div>
         </div>
