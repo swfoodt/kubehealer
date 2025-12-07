@@ -29,6 +29,7 @@ const HTMLTemplate = `
         .timeline-item.warning::before { background-color: #ffc107; }
         .timeline-date { font-size: 0.85em; color: #6c757d; margin-bottom: 2px; }
     </style>
+	<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -84,6 +85,25 @@ const HTMLTemplate = `
                     <hr>
                     <p class="mb-0"><strong>💡 修复建议:</strong> {{ .Suggestion }}</p>
                     {{ end }}
+                </div>
+                {{ end }}
+
+				{{ if .Logs }}
+                <div class="mt-3">
+                    <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#logs-{{ .Name }}">
+                        📄 查看容器日志 (最后 {{ len .Logs }} 行)
+                    </button>
+                    {{ if .LogKeywords }}
+                    <span class="badge bg-danger ms-2">发现关键词: {{ range .LogKeywords }}{{ . }} {{ end }}</span>
+                    {{ end }}
+                    
+                    <div class="collapse mt-2" id="logs-{{ .Name }}">
+                        <div class="card card-body bg-dark text-white font-monospace" style="font-size: 0.85em; max-height: 300px; overflow-y: auto;">
+                            {{ range .Logs }}
+                            <div>{{ . }}</div>
+                            {{ end }}
+                        </div>
+                    </div>
                 </div>
                 {{ end }}
             </div>

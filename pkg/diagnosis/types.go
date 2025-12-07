@@ -39,14 +39,16 @@ type DiagnosisResult struct {
 
 // ContainerDiagnosis 单个容器的诊断详情
 type ContainerDiagnosis struct {
-	Name         string  `json:"name"`
-	State        string  `json:"state"`         // Waiting, Running, Terminated
-	Reason       string  `json:"reason"`        // CrashLoopBackOff, OOMKilled ...
-	Message      string  `json:"message"`       // 详细信息
-	ExitCode     int32   `json:"exit_code"`     // 退出码
-	Ready        bool    `json:"ready"`         // 是否就绪
-	ResourceInfo string  `json:"resource_info"` // CPU/Mem 配置字符串
-	Issues       []Issue `json:"issues"`        // 发现的问题 (由规则引擎产出)
+	Name         string   `json:"name"`
+	State        string   `json:"state"`         // Waiting, Running, Terminated
+	Reason       string   `json:"reason"`        // CrashLoopBackOff, OOMKilled ...
+	Message      string   `json:"message"`       // 详细信息
+	ExitCode     int32    `json:"exit_code"`     // 退出码
+	Ready        bool     `json:"ready"`         // 是否就绪
+	ResourceInfo string   `json:"resource_info"` // CPU/Mem 配置字符串
+	Issues       []Issue  `json:"issues"`        // 发现的问题 (由规则引擎产出)
+	Logs         []string `json:"logs"`          // 抓取的最后几行日志
+	LogKeywords  []string `json:"log_keywords"`  // 从日志中提取的关键词
 }
 
 // Issue 代表发现的一个具体问题

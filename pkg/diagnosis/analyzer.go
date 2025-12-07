@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -117,6 +118,26 @@ func (a *Analyzer) GetContainerDiagnosis(pod *corev1.Pod, cs corev1.ContainerSta
 		// (简单起见，这里我们只把上次退出作为一条 Info 级别的 Issue 或者拼接在 Reason 里？)
 		// 为了结构化，我们暂时不在这里加，因为 Day 13 的规则引擎应该已经处理了 OOM。
 		// 如果只是普通退出，我们这里不需要额外处理，除非想展示历史。
+	}
+
+	// ----------------------------------------------------
+	// 日志分析 (Day 27)
+	// ----------------------------------------------------
+	// 只有当容器不正常 (非 Running) 或者有重启记录时，才去抓日志
+	// 避免抓取正常运行的日志浪费资源
+	if cs.State.Running == nil || cs.RestartCount > 0 {
+		logResult := AnalyzeContainerLogs(a.client, pod, cs.Name)
+		diag.Logs = logResult.Logs
+		diag.LogKeywords = logResult.MatchedKeyords
+
+		// 如果日志里发现了严重错误，也可以生成一个 Issue
+		if len(logResult.MatchedKeyords) > 0 {
+			diag.Issues = append(diag.Issues, Issue{
+				Type:       "Error",
+				Title:      fmt.Sprintf("日志中发现错误特征: %s", strings.Join(logResult.MatchedKeyords, ", ")),
+				Suggestion: "请查看下方详细日志定位代码问题",
+			})
+		}
 	}
 
 	return diag

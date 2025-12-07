@@ -4,82 +4,117 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
-
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/swfoodt/kubehealer/pkg/diagnosis"
 	"github.com/swfoodt/kubehealer/pkg/k8s"
 	"github.com/swfoodt/kubehealer/pkg/report"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/cache"
+)
+
+// 定义过滤参数变量
+var (
+	monitorNamespace string
+	monitorLabels    string
+	monitorInterval  time.Duration
 )
 
 var monitorCmd = &cobra.Command{
 	Use:   "monitor",
 	Short: "实时监控 Pod 状态变化 (Informer模式)",
-	Long:  `启动一个长运行进程，监听集群内 Pod 的创建、更新和删除事件。`,
+	Long:  `启动一个长运行进程，监听集群内 Pod 的创建、更新和删除事件。支持通过 Namespace 和 Label 进行过滤。`,
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("🚀 启动 KubeHealer 监控模式 (按 Ctrl+C 退出)...")
+		fmt.Println("🚀 启动 KubeHealer 监控模式(ctrl+c退出)...")
+		fmt.Printf("   - 监听 Namespace: %s (默认为空，表示所有)\n", monitorNamespace)
+		fmt.Printf("   - 监听 Labels: %s\n", monitorLabels)
 
-		// 1. 初始化客户端
+		// 初始化客户端
 		client, err := k8s.NewClient()
 		if err != nil {
 			fmt.Printf("❌ 连接失败: %v\n", err)
 			os.Exit(1)
 		}
 
-		// 2. 创建 SharedInformerFactory
-		// defaultResync: 0 表示不进行强制的全量同步（除非断连重连）
-		factory := informers.NewSharedInformerFactory(client.Clientset, 0)
+		// 创建 SharedInformerFactory (带过滤选项)
+		// 使用 WithOptions 支持 Namespace 和 LabelSelector
+		var factory informers.SharedInformerFactory
 
-		// 3. 获取 Pod 的 Informer
+		// 构造 ListOptions
+		tweakListOptions := func(options *metav1.ListOptions) {
+			if monitorLabels != "" {
+				options.LabelSelector = monitorLabels
+			}
+		}
+
+		if monitorNamespace != "" {
+			// 如果指定了 Namespace，只监听该 Namespace
+			factory = informers.NewSharedInformerFactoryWithOptions(
+				client.Clientset,
+				monitorInterval,
+				informers.WithNamespace(monitorNamespace),
+				informers.WithTweakListOptions(tweakListOptions),
+			)
+		} else {
+			// 否则监听所有 Namespace
+			factory = informers.NewSharedInformerFactoryWithOptions(
+				client.Clientset,
+				monitorInterval,
+				informers.WithTweakListOptions(tweakListOptions),
+			)
+		}
+
+		// 获取 Pod 的 Informer
 		podInformer := factory.Core().V1().Pods().Informer()
 
-		// 4. 注册事件处理函数 (Add, Update, Delete)
+		// 注册事件处理函数
 		podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
-				// 当有新 Pod 创建时触发
 				pod := obj.(*corev1.Pod)
 				fmt.Printf("[➕ Added] %s/%s (Status: %s)\n", pod.Namespace, pod.Name, pod.Status.Phase)
 
-				// 如果新 Pod 一上来就是 Pending (或者可能卡住了) 或者 Failed，诊断它
-				// 这里只要不是 Running/Succeeded 就诊断一下
 				if pod.Status.Phase != corev1.PodRunning && pod.Status.Phase != corev1.PodSucceeded {
-					go triggerDiagnosis(pod, client) // 使用 go 协程，不阻塞监控主线程
+					go triggerDiagnosis(pod, client)
 				}
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				// 当 Pod 发生变化时触发 (这是最频繁的)
 				oldPod := oldObj.(*corev1.Pod)
 				newPod := newObj.(*corev1.Pod)
 
-				// 为了避免刷屏，只有状态改变时才打印
-				if oldPod.Status.Phase == newPod.Status.Phase &&
-					oldPod.Status.ContainerStatuses[0].RestartCount == newPod.Status.ContainerStatuses[0].RestartCount {
-					// 状态没变，重启次数没变，忽略（过滤掉单纯的 ResourceUpdate 等噪音）
+				// 【修复】安全地获取重启次数
+				// 如果 Pod 处于 Pending 状态，ContainerStatuses 可能是空的，直接访问 [0] 会 panic
+				var oldRestarts, newRestarts int32
+				if len(oldPod.Status.ContainerStatuses) > 0 {
+					oldRestarts = oldPod.Status.ContainerStatuses[0].RestartCount
+				}
+				if len(newPod.Status.ContainerStatuses) > 0 {
+					newRestarts = newPod.Status.ContainerStatuses[0].RestartCount
+				}
+
+				// 只有状态发生实质变化才关心 (Phase 变了，或者重启次数变了)
+				if oldPod.Status.Phase == newPod.Status.Phase && oldRestarts == newRestarts {
+					// fmt.Println("Resync triggered for", newPod.Name) //测试-interval功能用
 					return
 				}
 
 				fmt.Printf("[🔄 Updated] %s/%s: %s -> %s (Restarts: %d)\n",
 					newPod.Namespace, newPod.Name, oldPod.Status.Phase, newPod.Status.Phase,
-					newPod.Status.ContainerStatuses[0].RestartCount)
+					newRestarts)
 
 				// 自动诊断逻辑
-				// 1. 如果变成了非 Running 状态 (比如 Failed, Unknown)
-				// 2. 或者虽然是 Running，但重启次数增加了 (CrashLoopBackOff 的特征)
-				isCrashLoop := newPod.Status.ContainerStatuses[0].RestartCount > oldPod.Status.ContainerStatuses[0].RestartCount
-
+				// 如果变成了非 Running 状态，或者重启次数增加了
+				isCrashLoop := newRestarts > oldRestarts
 				if newPod.Status.Phase != corev1.PodRunning || isCrashLoop {
 					go triggerDiagnosis(newPod, client)
 				}
 			},
 			DeleteFunc: func(obj interface{}) {
-				// 当 Pod 被删除时触发
-				// 删除就不诊断了，人都没了
 				pod, ok := obj.(*corev1.Pod)
 				if !ok {
 					tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
@@ -95,64 +130,76 @@ var monitorCmd = &cobra.Command{
 			},
 		})
 
-		// 5. 启动 Informer
-		// 使用 channel 来控制停止
+		// 启动
 		stopper := make(chan struct{})
 		defer close(stopper)
-
-		// 这是一个非阻塞调用，会在后台启动所有注册的 Informer
 		factory.Start(stopper)
 
-		// 6. 等待缓存同步 (重要！)
-		// 必须等待它把集群里现有的 Pod 都拉取到本地缓存，才能认为是 Ready
 		fmt.Println("⏳ 正在同步缓存...")
 		if !cache.WaitForCacheSync(stopper, podInformer.HasSynced) {
 			fmt.Println("❌ 缓存同步超时")
 			return
 		}
-		fmt.Println("✅ 缓存同步完成，开始监听事件...")
+		fmt.Println("✅ 开始监听...")
 
-		// 7. 阻塞主进程，直到收到 Ctrl+C
+		// 优雅退出
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
-		fmt.Println("\n👋 监控停止")
+		fmt.Println("\n👋 收到停止信号，正在退出...")
 	},
 }
 
-func init() {
-	rootCmd.AddCommand(monitorCmd)
-}
+// 去重缓存 (PodUID -> 上次诊断时间)
+// 使用 sync.Map 保证并发安全
+var diagnosisCooldown sync.Map
 
 // triggerDiagnosis 触发一次诊断并生成报告
-// 需要传入 client 用于初始化 Analyzer
 func triggerDiagnosis(pod *corev1.Pod, client *k8s.Client) {
-	// 1. 初始化分析器
-	analyzer := diagnosis.NewAnalyzer(client.Clientset)
+	// 去重检查
+	// 冷却时间设置为 1 分钟
+	const cooldownPeriod = 1 * time.Minute
 
-	// 2. 执行诊断
+	// 获取上次诊断时间
+	if lastTime, loaded := diagnosisCooldown.Load(pod.UID); loaded {
+		if time.Since(lastTime.(time.Time)) < cooldownPeriod {
+			// 如果还在冷却期内，直接跳过
+			fmt.Printf("⏳ [%s] 处于冷却期，跳过重复诊断\n", pod.Name)
+			return
+		}
+	}
+
+	// 记录本次诊断时间 (相当于更新缓存)
+	diagnosisCooldown.Store(pod.UID, time.Now())
+
+	// 初始化分析器 (以下逻辑保持不变)
+	analyzer := diagnosis.NewAnalyzer(client.Clientset)
 	result := analyzer.AnalyzePod(pod)
 
-	// 3. 只有当确实发现问题时（Containers里有Issue，或者Events里有Warn），才生成报告
-	// 这里做一个简单的判断：如果 Phase 不是 Running/Succeeded，或者 RestartCount > 0
-	// 生产环境可以做得更细，这里我们简单点：只要触发了就生成报告
-
-	// 4. 生成 HTML 报告
+	// 生成报告
 	reportDir := "reports"
 	if _, err := os.Stat(reportDir); os.IsNotExist(err) {
 		_ = os.Mkdir(reportDir, 0755)
 	}
 
 	timestamp := time.Now().Format("20060102_150405")
-	fileName := fmt.Sprintf("%s_auto_%s.html", pod.Name, timestamp) // 加个 _auto_ 前缀区分
+	fileName := fmt.Sprintf("%s_auto_%s.html", pod.Name, timestamp)
 	fullPath := filepath.Join(reportDir, fileName)
 
 	err := report.GenerateHTML(result, fullPath)
 	if err != nil {
 		fmt.Printf("❌ [%s] 报告生成失败: %v\n", pod.Name, err)
 	} else {
-		// 获取绝对路径方便点击
 		absPath, _ := filepath.Abs(fullPath)
 		fmt.Printf("🚨 [%s] 异常检测! 诊断报告已生成: %s\n", pod.Name, absPath)
 	}
+}
+
+func init() {
+	rootCmd.AddCommand(monitorCmd)
+	// 注册 Flags
+	monitorCmd.Flags().StringVarP(&monitorNamespace, "namespace", "n", "", "指定监控的 Namespace (默认为所有)")
+	monitorCmd.Flags().StringVarP(&monitorLabels, "label-selector", "l", "", "指定监控的 Label Selector (例如: app=nginx)")
+	// 默认 10 分钟同步一次，避免长时间运行导致缓存漂移
+	monitorCmd.Flags().DurationVarP(&monitorInterval, "interval", "i", 10*time.Minute, "Informer 全量同步时间间隔 (例如 10m, 1h)")
 }
