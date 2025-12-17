@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest # 使用 Ubuntu 运行测试
+
+    steps:
+    - name: Checkout code (检出代码)
+      uses: actions/checkout@v4
+
+    - name: Set up Go (安装 Go)
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        cache: true # 开启自动缓存，加速后续构建
+
+    - name: Verify dependencies (检查依赖)
+      run: go mod verify
+
+    - name: Run Unit Tests (运行单元测试)
+      # 运行 TestOOMRule 等测试
+      run: go test -v ./pkg/...
+
+    - name: Build Check - Linux (编译检查)
+      run: GOOS=linux GOARCH=amd64 go build -v -o /dev/null ./cmd
+
+    - name: Build Check - Windows (编译检查)
+      run: GOOS=windows GOARCH=amd64 go build -v -o /dev/null ./cmd
+
+    - name: Build Check - macOS (编译检查)
+      run: GOOS=darwin GOARCH=amd64 go build -v -o /dev/null ./cmd

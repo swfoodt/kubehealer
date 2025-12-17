@@ -24,3 +24,4 @@ Thumbs.db
 
 # Reports (忽略生成的报告目录)
 reports/
+bin/
