@@ -1,3 +1,4 @@
+[![CI](https://github.com/swfoodt/kubehealer/actions/workflows/ci.yaml/badge.svg)](https://github.com/swfoodt/kubehealer/actions/workflows/ci.yaml)
 # 🚑 KubeHealer
 
 **KubeHealer** 是一个基于 Go 和 `client-go` 开发的 Kubernetes Pod 诊断与监控工具。它不仅对 Pod 进行**深度体检**（根因分析），还能**实时监控**集群状态，自动发现并记录故障现场。
