@@ -13,11 +13,11 @@ import (
 )
 
 type Analyzer struct {
-	client *kubernetes.Clientset
+	client kubernetes.Interface
 	engine *RuleEngine // 诊断引擎
 }
 
-func NewAnalyzer(client *kubernetes.Clientset) *Analyzer {
+func NewAnalyzer(client kubernetes.Interface) *Analyzer {
 	return &Analyzer{
 		client: client,
 		engine: NewRuleEngine(), // 初始化诊断引擎

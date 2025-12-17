@@ -29,7 +29,7 @@ type LogAnalysisResult struct {
 }
 
 // AnalyzeContainerLogs 获取并分析容器日志
-func AnalyzeContainerLogs(client *kubernetes.Clientset, pod *corev1.Pod, containerName string) LogAnalysisResult {
+func AnalyzeContainerLogs(client kubernetes.Interface, pod *corev1.Pod, containerName string) LogAnalysisResult {
 	result := LogAnalysisResult{
 		Logs:           []string{},
 		MatchedKeyords: []string{},
