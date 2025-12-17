@@ -13,6 +13,7 @@ import (
 	"github.com/swfoodt/kubehealer/pkg/k8s"
 	"github.com/swfoodt/kubehealer/pkg/report"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -30,20 +31,20 @@ var diagnoseCmd = &cobra.Command{
 
 		// 只有在默认模式下才打印这行，否则会污染 Markdown 输出
 		if outputFormat == "" || outputFormat == "table" {
-			fmt.Printf("🔍 正在诊断 Pod: %s ...\n\n", podName)
+			logrus.Infof("🔍 正在诊断 Pod: %s ...\n\n", podName)
 		}
 
 		// 初始化客户端
 		client, err := k8s.NewClient()
 		if err != nil {
-			fmt.Printf("❌ 错误: 无法连接集群 - %v\n", err)
+			logrus.Errorf("❌ 错误: 无法连接集群 - %v\n", err)
 			os.Exit(1)
 		}
 
 		// 获取 Pod
 		pod, err := client.Clientset.CoreV1().Pods("default").Get(context.TODO(), podName, metav1.GetOptions{})
 		if err != nil {
-			fmt.Printf("❌ 错误: 无法找到 Pod %s - %v\n", podName, err)
+			logrus.Errorf("❌ 错误: 无法找到 Pod %s - %v\n", podName, err)
 			os.Exit(1)
 		}
 
@@ -60,7 +61,7 @@ var diagnoseCmd = &cobra.Command{
 			// MarshalIndent 生成带缩进的 JSON
 			jsonData, err := json.MarshalIndent(result, "", "  ")
 			if err != nil {
-				fmt.Printf("❌ JSON 序列化失败: %v\n", err)
+				logrus.Errorf("❌ JSON 序列化失败: %v\n", err)
 				os.Exit(1)
 			}
 			fmt.Println(string(jsonData))
@@ -78,19 +79,19 @@ var diagnoseCmd = &cobra.Command{
 
 			err := report.GenerateHTML(result, fullPath)
 			if err != nil {
-				fmt.Printf("❌ 生成 HTML 失败: %v\n", err)
+				logrus.Errorf("❌ 生成 HTML 失败: %v\n", err)
 				os.Exit(1)
 			}
 			// 获取绝对路径，方便用户点击
 			absPath, _ := filepath.Abs(fullPath)
-			fmt.Printf("✅ 诊断报告已归档: %s\n", absPath)
+			logrus.Infof("✅ 诊断报告已归档: %s\n", absPath)
 
 		default:
 			report.PrintTable(result)
 		}
 
 		// 打印 PID 和程序退出标记
-		fmt.Printf("\n🏁 [PID: %d] 诊断结束，程序即将退出。\n", os.Getpid())
+		logrus.Infof("\n🏁 [PID: %d] 诊断结束，程序即将退出。\n", os.Getpid())
 
 		// 强制写入新行，清除终端残留输入/输出
 		fmt.Println()

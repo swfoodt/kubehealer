@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/swfoodt/kubehealer/pkg/diagnosis"
@@ -38,15 +39,15 @@ var monitorCmd = &cobra.Command{
 		labels := viper.GetString("monitor.labels")
 		interval := viper.GetDuration("monitor.interval")
 
-		fmt.Println("🚀 启动 KubeHealer 监控模式(ctrl+c退出)...")
-		fmt.Printf("   - 监听 Namespace: %s\n", ns)
-		fmt.Printf("   - 监听 Labels: %s\n", labels)
-		fmt.Printf("   - 同步间隔: %s\n", interval)
+		logrus.Info("🚀 启动 KubeHealer 监控模式(ctrl+c退出)...")
+		logrus.Infof("   - 监听 Namespace: %s\n", ns)
+		logrus.Infof("   - 监听 Labels: %s\n", labels)
+		logrus.Infof("   - 同步间隔: %s\n", interval)
 
 		// 初始化客户端
 		client, err := k8s.NewClient()
 		if err != nil {
-			fmt.Printf("❌ 连接失败: %v\n", err)
+			logrus.Errorf("❌ 连接失败: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -85,7 +86,7 @@ var monitorCmd = &cobra.Command{
 		podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				pod := obj.(*corev1.Pod)
-				fmt.Printf("[➕ Added] %s/%s (Status: %s)\n", pod.Namespace, pod.Name, pod.Status.Phase)
+				logrus.Infof("[➕ Added] %s/%s (Status: %s)\n", pod.Namespace, pod.Name, pod.Status.Phase)
 
 				if pod.Status.Phase != corev1.PodRunning && pod.Status.Phase != corev1.PodSucceeded {
 					go triggerDiagnosis(pod, client)
@@ -111,7 +112,7 @@ var monitorCmd = &cobra.Command{
 					return
 				}
 
-				fmt.Printf("[🔄 Updated] %s/%s: %s -> %s (Restarts: %d)\n",
+				logrus.Infof("[🔄 Updated] %s/%s: %s -> %s (Restarts: %d)\n",
 					newPod.Namespace, newPod.Name, oldPod.Status.Phase, newPod.Status.Phase,
 					newRestarts)
 
@@ -134,7 +135,7 @@ var monitorCmd = &cobra.Command{
 						return
 					}
 				}
-				fmt.Printf("[❌ Deleted] %s/%s\n", pod.Namespace, pod.Name)
+				logrus.Errorf("[❌ Deleted] %s/%s\n", pod.Namespace, pod.Name)
 			},
 		})
 
@@ -143,18 +144,18 @@ var monitorCmd = &cobra.Command{
 		defer close(stopper)
 		factory.Start(stopper)
 
-		fmt.Println("⏳ 正在同步缓存...")
+		logrus.Info("⏳ 正在同步缓存...")
 		if !cache.WaitForCacheSync(stopper, podInformer.HasSynced) {
-			fmt.Println("❌ 缓存同步超时")
+			logrus.Error("❌ 缓存同步超时")
 			return
 		}
-		fmt.Println("✅ 开始监听...")
+		logrus.Info("✅ 开始监听...")
 
 		// 优雅退出
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
-		fmt.Println("\n👋 收到停止信号，正在退出...")
+		logrus.Info("\n👋 收到停止信号，正在退出...")
 	},
 }
 
@@ -172,7 +173,7 @@ func triggerDiagnosis(pod *corev1.Pod, client *k8s.Client) {
 	if lastTime, loaded := diagnosisCooldown.Load(pod.UID); loaded {
 		if time.Since(lastTime.(time.Time)) < cooldownPeriod {
 			// 如果还在冷却期内，直接跳过
-			fmt.Printf("⏳ [%s] 处于冷却期，跳过重复诊断\n", pod.Name)
+			logrus.Infof("⏳ [%s] 处于冷却期，跳过重复诊断\n", pod.Name)
 			return
 		}
 	}
@@ -196,10 +197,10 @@ func triggerDiagnosis(pod *corev1.Pod, client *k8s.Client) {
 
 	err := report.GenerateHTML(result, fullPath)
 	if err != nil {
-		fmt.Printf("❌ [%s] 报告生成失败: %v\n", pod.Name, err)
+		logrus.Errorf("❌ [%s] 报告生成失败: %v\n", pod.Name, err)
 	} else {
 		absPath, _ := filepath.Abs(fullPath)
-		fmt.Printf("🚨 [%s] 异常检测! 诊断报告已生成: %s\n", pod.Name, absPath)
+		logrus.Infof("🚨 [%s] 异常检测! 诊断报告已生成: %s\n", pod.Name, absPath)
 	}
 }
 

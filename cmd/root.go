@@ -6,9 +6,14 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/swfoodt/kubehealer/pkg/util"
 )
 
-var cfgFile string
+// 全局变量
+var (
+	cfgFile string // 配置文件路径
+	debug   bool   // 是否开启调试模式
+)
 
 // rootCmd 代表没有调用子命令时的基础命令
 var rootCmd = &cobra.Command{
@@ -31,6 +36,7 @@ func init() {
 
 	// 全局参数: --config
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "配置文件 (默认为 $HOME/.kubehealer.yaml)")
+	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "开启调试模式 (显示详细日志)")
 }
 
 // initConfig 读取配置文件和环境变量
@@ -60,5 +66,15 @@ func initConfig() {
 	// 尝试读取配置
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Println("⚙️  已加载配置文件:", viper.ConfigFileUsed())
+	}
+
+	// 在配置读取完后，初始化日志
+	util.InitLogger(debug)
+
+	if err := viper.ReadInConfig(); err == nil {
+		// 使用 logrus 打印，而不是 fmt
+		// logrus.Infof("⚙️ 已加载配置文件: %s", viper.ConfigFileUsed())
+		// 注意：这里可能还没法直接用 logrus，因为 import 循环问题
+		// 暂时在 initConfig 里还是可以用 fmt 或者直接调 logrus
 	}
 }
