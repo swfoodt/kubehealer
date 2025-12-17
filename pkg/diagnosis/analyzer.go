@@ -12,11 +12,15 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// Analyzer 负责编排整个 Pod 的诊断流程。
+// 它依赖 RuleEngine 进行具体的规则匹配，并聚合所有诊断结果。
 type Analyzer struct {
 	client kubernetes.Interface
 	engine *RuleEngine // 诊断引擎
 }
 
+// NewAnalyzer 初始化一个新的诊断分析器。
+// client 参数应该是已连接的 K8s 客户端集合。
 func NewAnalyzer(client kubernetes.Interface) *Analyzer {
 	return &Analyzer{
 		client: client,
@@ -24,7 +28,8 @@ func NewAnalyzer(client kubernetes.Interface) *Analyzer {
 	}
 }
 
-// AnalyzePod 编排诊断流程
+// AnalyzePod 对指定的 Pod 进行全方位的健康检查。
+// 包括：基础状态、容器详情、事件流、日志分析以及规则引擎匹配。
 func (a *Analyzer) AnalyzePod(pod *corev1.Pod) DiagnosisResult {
 	result := DiagnosisResult{
 		PodName:      pod.Name,

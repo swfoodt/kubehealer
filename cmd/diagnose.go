@@ -101,6 +101,6 @@ var diagnoseCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(diagnoseCmd)
 
-	// 2. 绑定参数 --output 或 -o
+	// 绑定参数 --output 或 -o
 	diagnoseCmd.Flags().StringVarP(&outputFormat, "output", "o", "", "输出格式 (table, md, json)")
 }

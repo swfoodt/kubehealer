@@ -222,7 +222,7 @@ func init() {
 	// 默认 10 分钟同步一次，避免长时间运行导致缓存漂移
 	monitorCmd.Flags().DurationVarP(&monitorInterval, "interval", "i", 10*time.Minute, "Informer 全量同步时间间隔 (例如 10m, 1h)")
 
-	// 2. 绑定 Viper (让 Viper 知道这些 Flag 的存在)
+	// 绑定 Viper (让 Viper 知道这些 Flag 的存在)
 	viper.BindPFlag("monitor.namespace", monitorCmd.Flags().Lookup("namespace"))
 	viper.BindPFlag("monitor.labels", monitorCmd.Flags().Lookup("label-selector"))
 	viper.BindPFlag("monitor.interval", monitorCmd.Flags().Lookup("interval"))
