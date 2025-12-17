@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -33,7 +35,15 @@ var monitorCmd = &cobra.Command{
 	Short: "实时监控 Pod 状态变化 (Informer模式)",
 	Long:  `启动一个长运行进程，监听集群内 Pod 的创建、更新和删除事件。支持通过 Namespace 和 Label 进行过滤。`,
 	Run: func(cmd *cobra.Command, args []string) {
-		// Day 28: 从 Viper 获取最终配置 (覆盖全局变量)
+		// 启动 Pprof 性能分析服务器 (后台运行)
+		// 监听 6060 端口，不阻塞主程序
+		go func() {
+			logrus.Info("🕵️ Pprof 性能监控已启动: http://localhost:6060/debug/pprof")
+			if err := http.ListenAndServe("0.0.0.0:6060", nil); err != nil {
+				logrus.Warnf("Pprof 启动失败: %v", err)
+			}
+		}()
+		// 从 Viper 获取最终配置 (覆盖全局变量)
 		// 如果命令行没传，就用配置文件的；如果传了，Viper 会自动用命令行的
 		ns := viper.GetString("monitor.namespace")
 		labels := viper.GetString("monitor.labels")

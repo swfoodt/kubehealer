@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -192,25 +193,63 @@ func (a *Analyzer) GetPodEvents(pod *corev1.Pod) []string {
 		return []string{}
 	}
 
-	// 按时间排序 (LastTimestamp)
-	sort.Slice(events.Items, func(i, j int) bool {
-		return events.Items[i].LastTimestamp.Time.Before(events.Items[j].LastTimestamp.Time)
-	})
+	// 优化: 仅保留最近 1 小时的事件
+	var recentEvents []corev1.Event
+	oneHourAgo := time.Now().Add(-1 * time.Hour)
 
-	start := 0
-	if len(events.Items) > 5 {
-		start = len(events.Items) - 5
+	// 辅助函数: 获取事件发生的最佳时间 (解决 [未知] 问题)
+	getEventTime := func(e corev1.Event) time.Time {
+		if !e.LastTimestamp.IsZero() {
+			return e.LastTimestamp.Time
+		}
+		if !e.EventTime.IsZero() {
+			return e.EventTime.Time
+		}
+		// 如果都没有，尝试 FirstTimestamp
+		if !e.FirstTimestamp.IsZero() {
+			return e.FirstTimestamp.Time
+		}
+		return time.Time{} // 真的一无所有
 	}
 
-	// 打印最近的 5 条
-	for i := start; i < len(events.Items); i++ {
-		e := events.Items[i]
-		age := TranslateTimestamp(e.LastTimestamp.Time)
+	for _, e := range events.Items {
+		t := getEventTime(e)
+		// 只要时间有效，且在1小时内，就保留
+		if !t.IsZero() && t.After(oneHourAgo) {
+			recentEvents = append(recentEvents, e)
+		}
+	}
+
+	// 3. 按时间排序 (使用 recentEvents 而不是 events.Items)
+	sort.Slice(recentEvents, func(i, j int) bool {
+		t1 := getEventTime(recentEvents[i])
+		t2 := getEventTime(recentEvents[j])
+		return t1.Before(t2)
+	})
+
+	// 4. 截取最近 5 条
+	start := 0
+	if len(recentEvents) > 5 {
+		start = len(recentEvents) - 5
+	}
+
+	for i := start; i < len(recentEvents); i++ {
+		e := recentEvents[i] // ✅ 这里使用 recentEvents
+
+		// 获取用于展示的时间
+		t := getEventTime(e)
+		age := TranslateTimestamp(t) // 确保 TranslateTimestamp 能处理 time.Time
+
 		icon := "🔹"
 		if e.Type == "Warning" {
 			icon = "🔸"
 		}
 		result = append(result, fmt.Sprintf("%s [%s] %s: %s", icon, age, e.Reason, e.Message))
 	}
+
+	if len(result) == 0 {
+		result = append(result, "暂无近期事件")
+	}
+
 	return result
 }
