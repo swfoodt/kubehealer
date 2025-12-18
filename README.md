@@ -138,6 +138,9 @@ graph TD
     J -->|Render| K[HTML / Terminal / JSON]
 ```
 
+📚 **更多介绍**:
+- [架构设计文档 (Architecture)](docs/ARCHITECTURE.md)
+
 ---
 
 ## 🛠️ 开发与测试 (Development)
