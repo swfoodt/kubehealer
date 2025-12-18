@@ -94,6 +94,10 @@ go build -o kubehealer ./cmd
 ```
 
 ---
+📚 **更多文档**:
+- [详细安装指南 (Installation Guide)](docs/INSTALL.md)
+- [完整使用手册 (User Manual)](docs/USAGE.md)
+---
 
 ## ⚙️ 配置管理 (Configuration)
 
